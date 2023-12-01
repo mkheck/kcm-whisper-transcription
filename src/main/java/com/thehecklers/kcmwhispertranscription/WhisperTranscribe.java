@@ -1,19 +1,29 @@
 package com.thehecklers.kcmwhispertranscription;
 
-import org.apache.hc.client5.http.classic.methods.HttpPost;
-import org.apache.hc.client5.http.entity.mime.FileBody;
-import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
-import org.apache.hc.client5.http.entity.mime.StringBody;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.core5.http.ContentType;
-import org.apache.hc.core5.http.HttpEntity;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
-import org.apache.hc.core5.http.message.StatusLine;
+//import org.apache.hc.client5.http.classic.methods.HttpPost;
+//import org.apache.hc.client5.http.entity.mime.FileBody;
+//import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
+//import org.apache.hc.client5.http.entity.mime.StringBody;
+//import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+//import org.apache.hc.client5.http.impl.classic.HttpClients;
+//import org.apache.hc.core5.http.ContentType;
+//import org.apache.hc.core5.http.HttpEntity;
+//import org.apache.hc.core5.http.io.entity.EntityUtils;
+//import org.apache.hc.core5.http.message.StatusLine;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.UncheckedIOException;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.*;
+//import org.springframework.http.RequestEntity;
+import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.http.converter.FormHttpMessageConverter;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestTemplate;
+
+import java.io.*;
+//import java.io.IOException;
+//import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -54,25 +64,35 @@ public class WhisperTranscribe {
     private String transcribeChunk(String prompt, File chunkFile) {
         System.out.printf("Transcribing %s%n", chunkFile.getName());
 
-        try (CloseableHttpClient client = HttpClients.createDefault()) {
-            HttpPost httpPost = new HttpPost(URL);
-            httpPost.setHeader("Authorization", "Bearer %s".formatted(KEY));
+        ResponseEntity<String> response = null;
 
-            HttpEntity entity = MultipartEntityBuilder.create()
-                    .setContentType(ContentType.MULTIPART_FORM_DATA)
-                    .addPart("file", new FileBody(chunkFile, ContentType.DEFAULT_BINARY))
-                    .addPart("model", new StringBody(MODEL, ContentType.DEFAULT_TEXT))
-                    .addPart("response_format", new StringBody("text", ContentType.DEFAULT_TEXT))
-                    .addPart("prompt", new StringBody(prompt, ContentType.DEFAULT_TEXT))
-                    .build();
-            httpPost.setEntity(entity);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+        headers.add("Authorization", "Bearer %s".formatted(KEY));
 
-            return client.execute(httpPost, response -> {
-                System.out.println("Status: " + new StatusLine(response));
-                return EntityUtils.toString(response.getEntity());
-            });
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        try (InputStream inputStream = new FileInputStream(chunkFile)) {
+            var contentsAsResource = new ByteArrayResource(inputStream.readAllBytes()) {
+                @Override
+                public String getFilename() {
+                    return chunkFile.getName(); // Filename has to be returned in order to be able to post.
+                }
+            };
+
+            var builder = new MultipartBodyBuilder();
+
+            builder.part("file", contentsAsResource, MediaType.APPLICATION_OCTET_STREAM);
+            builder.part("model", MODEL, MediaType.TEXT_PLAIN);
+            builder.part("response_format", "text", MediaType.TEXT_PLAIN);
+            builder.part("prompt", prompt, MediaType.TEXT_PLAIN);
+
+            //MultiValueMap<String, HttpEntity<?>> body = builder.build();
+            HttpEntity<MultiValueMap<String, HttpEntity<?>>> httpEntity = new HttpEntity<>(builder.build(), headers);
+
+            return new RestTemplate()
+                    .postForEntity(URL, httpEntity, String.class)
+                    .getBody();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
